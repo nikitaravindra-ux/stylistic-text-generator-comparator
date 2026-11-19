@@ -1,10 +1,15 @@
 """Model + tokenizer loading. The real run uses distilgpt2; tests/--tiny use a random 2-layer GPT-2 and a byte tokenizer
 so everything works offline."""
+import os
+
 import torch
 from transformers import GPT2Config, GPT2LMHeadModel
 
 
 def pick_device() -> torch.device:
+    """MPS on Apple Silicon when available, otherwise CPU. Set STG_DEVICE=cpu (or mps/cuda) to override."""
+    if os.environ.get("STG_DEVICE"):
+        return torch.device(os.environ["STG_DEVICE"])
     if torch.backends.mps.is_available():
         return torch.device("mps")
     return torch.device("cpu")

@@ -5,14 +5,15 @@
 from pathlib import Path
 
 from app import corpus
-from app import finetune, generate as gen, lora
-from app.models import load_model
+from app import compare, finetune, generate as gen, lora
+from app.models import load_model, pick_device
 from app.ngram import NGramModel
 
 ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = ROOT / "corpus" / "raw"
 CLEAN_PATH = ROOT / "corpus" / "clean.txt"
 OUT_DIR = ROOT / "outputs"
+DOCS_DIR = ROOT / "docs"
 ADAPTER_PATH = OUT_DIR / "adapter" / "lora_adapter.pt"
 
 # --- Milestone 1: Prepare a small corpus of sports commentary text.
@@ -73,5 +74,36 @@ def milestone_5(model, tok, prompt: str = "", max_new_tokens: int = 40, temperat
 
 # --- Milestone 6: Provide a qualitative comparison interface for generated texts from both models.
 # Hint: Design a simple display to show the outputs from both models side-by-side for easy evaluation.
-def milestone_6():  # TODO(milestone 6)
-    raise NotImplementedError("TODO(milestone 6)")
+def load_adapted_model(model_name: str = "distilgpt2", adapter_path=ADAPTER_PATH, device=None):
+    """Fresh base model + the saved adapter (no retraining needed). Returns (model, tokenizer)."""
+    model, tok = load_model(model_name)
+    lora.load_lora(model, adapter_path)
+    lora.assert_only_lora_trainable(model)
+    return model.to(device or pick_device()).eval(), tok
+
+
+def milestone_6(model, tok, ngram: NGramModel, prompts=None, max_new_tokens: int = 40, temperature: float = 0.8,
+                top_k: int = 40, seed: int = 0, out_path=OUT_DIR / "comparison.md", model_name: str = "distilgpt2",
+                corpus_path=CLEAN_PATH, discussion_path=DOCS_DIR / "discussion.md", width: int | None = None) -> str:
+    """Generate from N-gram, base LLM (adapters off) and LoRA LLM for the same prompts; print-ready side-by-side text,
+    plus a markdown report written to out_path. Returns the side-by-side text."""
+    prompts = list(prompts or compare.DEFAULT_PROMPTS)
+    kw = dict(max_new_tokens=max_new_tokens, temperature=temperature, top_k=top_k, seed=seed)
+    rows = compare.run_comparison(
+        prompts,
+        lambda p: ngram.generate(p, max_tokens=max_new_tokens, temperature=temperature, seed=seed),
+        lambda p: milestone_5(model, tok, p, adapters=False, **kw),
+        lambda p: milestone_5(model, tok, p, adapters=True, **kw))
+    _, val = corpus.split_lines(corpus.load_corpus(corpus_path))
+    device, block = next(model.parameters()).device, 64
+    with lora.adapters_disabled(model):
+        base_ppl = finetune.perplexity(finetune.eval_loss(model, tok, val, block, device))
+    lora_ppl = finetune.perplexity(finetune.eval_loss(model, tok, val, block, device))
+    trainable, total = lora.count_parameters(model)
+    meta = {"temperature": temperature, "top_k": top_k, "seed": seed, "max_new_tokens": max_new_tokens, "n": ngram.n,
+            "k": ngram.k, "model_name": model_name, "ngram_ppl": ngram.perplexity(val), "base_ppl": base_ppl,
+            "lora_ppl": lora_ppl, "trainable": trainable, "total": total, "pct": 100 * trainable / total,
+            **{k: model.lora_config[k] for k in ("r", "alpha")}, "targets": ", ".join(model.lora_config["target_modules"])}
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(out_path).write_text(compare.render_markdown(rows, meta, compare.load_discussion(discussion_path)), encoding="utf-8")
+    return compare.render_side_by_side(rows, width)

@@ -130,7 +130,7 @@ def test_milestone_4(tmp_path):
     for n, p in model.named_parameters():
         if "lora_" not in n:
             assert torch.equal(p, base_before[n]) and not p.requires_grad, n
-    assert any(float(p.abs().sum()) > 0 for n, p in model.named_parameters() if "lora_B" in n)
+    assert any(float(p.detach().abs().sum()) > 0 for n, p in model.named_parameters() if "lora_B" in n)
     # artefacts: adapter file + training log + loss curve
     assert (tmp_path / "a.pt").exists() and (tmp_path / "a.pt").stat().st_size < 1_000_000
     log = json.loads((tmp_path / "train_log.json").read_text())
@@ -157,7 +157,32 @@ def test_milestone_5():
 
 
 # Milestone 6: Provide a qualitative comparison interface for generated texts from both models.
-@pytest.mark.skip(reason="remove this line when you start milestone 6")
-def test_milestone_6():
-    raise NotImplementedError("write the test for milestone 6")
-
+def test_milestone_6(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("STG_DEVICE", "cpu")
+    import torch
+    model, tok = core.milestone_3("tiny", dropout=0.0)
+    with torch.no_grad():
+        for p in model.parameters():
+            if p.requires_grad:
+                p.add_(torch.randn_like(p) * 0.2)
+    ngram = core.milestone_2(n=3)
+    out = core.milestone_6(model, tok, ngram, ["The crowd", "Break point,"], max_new_tokens=15, seed=1,
+                           out_path=tmp_path / "comparison.md", model_name="tiny", width=150,
+                           discussion_path=tmp_path / "missing.md")
+    # the side-by-side view labels all three models and shows each prompt
+    for label in ("N-gram", "distilgpt2 (base)", "distilgpt2 + LoRA", "'The crowd'", "'Break point,'"):
+        assert label in out
+    md = (tmp_path / "comparison.md").read_text()
+    assert md.count("### ") == 2 and "perplexity" in md and "| N-gram |" in md and "| distilgpt2 + LoRA |" in md
+    # the n-gram column really is the n-gram model's output for that prompt
+    assert "The crowd " + ngram.generate("The crowd", max_tokens=15, temperature=0.8, seed=1) in md
+    # CLI: whole pipeline offline on the tiny model, then generate from the saved adapter
+    from app.cli import main
+    main(["all", "--model-name", "tiny", "--epochs", "1", "--out-dir", str(tmp_path / "run"), "--max-new-tokens", "10",
+          "--prompt", "The crowd"])
+    printed = capsys.readouterr().out
+    assert "milestone 1" in printed and "trainable params" in printed and "report written" in printed
+    assert (tmp_path / "run" / "adapter" / "lora_adapter.pt").exists() and (tmp_path / "run" / "comparison.md").exists()
+    main(["generate", "--which", "base", "--model-name", "tiny", "--out-dir", str(tmp_path / "run"), "--prompt", "Hi",
+          "--max-new-tokens", "5"])
+    main(["ngram", "--samples", "2", "--prompt", "The crowd"])
