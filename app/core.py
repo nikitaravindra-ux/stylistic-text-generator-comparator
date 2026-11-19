@@ -1,9 +1,22 @@
-"""Your code. One stub per milestone; build them in order and keep each one small."""
+"""One function per milestone. Each is a thin orchestrator over a focused module:
+
+    1 corpus.py    2 ngram.py    3 lora.py + models.py    4 finetune.py    5 generate.py    6 compare.py
+"""
+from pathlib import Path
+
+from app import corpus
+
+ROOT = Path(__file__).resolve().parent.parent
+RAW_DIR = ROOT / "corpus" / "raw"
+CLEAN_PATH = ROOT / "corpus" / "clean.txt"
+OUT_DIR = ROOT / "outputs"
 
 # --- Milestone 1: Prepare a small corpus of sports commentary text.
 # Hint: Focus on collecting and cleaning a relevant text dataset.
-def milestone_1():  # TODO(milestone 1)
-    raise NotImplementedError("TODO(milestone 1)")
+def milestone_1(raw_dir=RAW_DIR, out_path=CLEAN_PATH, stats_path=OUT_DIR / "corpus_stats.json") -> dict:
+    """Clean the raw transcripts into corpus/clean.txt and return corpus stats (lines, tokens, vocab size)."""
+    Path(stats_path).parent.mkdir(parents=True, exist_ok=True)
+    return corpus.build_corpus(raw_dir, out_path, stats_path)
 
 
 # --- Milestone 2: Implement the n-gram model and generate text from it.
