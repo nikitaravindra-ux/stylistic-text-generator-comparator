@@ -5,6 +5,8 @@
 from pathlib import Path
 
 from app import corpus
+from app import lora
+from app.models import load_model
 from app.ngram import NGramModel
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -30,8 +32,13 @@ def milestone_2(n: int = 3, k: float = 0.05, corpus_path=CLEAN_PATH) -> NGramMod
 
 # --- Milestone 3: Load a small pre-trained LLM and implement LoRA adapter injection.
 # Hint: Use the technique from the drill to inject LoRA adapters into a pre-trained LLM.
-def milestone_3():  # TODO(milestone 3)
-    raise NotImplementedError("TODO(milestone 3)")
+def milestone_3(model_name: str = "distilgpt2", r: int = 8, alpha: float = 16.0, dropout: float = 0.05,
+                targets=lora.DEFAULT_TARGETS):
+    """Load a small pretrained LLM and inject hand-written LoRA adapters. Returns (model, tokenizer)."""
+    model, tok = load_model(model_name)
+    lora.inject_lora(model, targets, r=r, alpha=alpha, dropout=dropout)
+    lora.assert_only_lora_trainable(model)  # base frozen, adapters trainable -- fail loudly otherwise
+    return model, tok
 
 
 # --- Milestone 4: Fine-tune the LoRA adapter on the sports commentary corpus.

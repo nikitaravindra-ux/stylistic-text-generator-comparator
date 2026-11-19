@@ -66,9 +66,48 @@ def test_milestone_2():
 
 
 # Milestone 3: Load a small pre-trained LLM and implement LoRA adapter injection.
-@pytest.mark.skip(reason="remove this line when you start milestone 3")
-def test_milestone_3():
-    raise NotImplementedError("write the test for milestone 3")
+def test_milestone_3(tmp_path):
+    import torch
+    from app import lora
+    from app.models import tiny_model
+    base, tok = tiny_model()
+    ids = torch.tensor([tok.encode("what a goal!")])
+    with torch.no_grad():
+        before = base(ids).logits.clone()
+    model, _ = core.milestone_3("tiny", r=4, alpha=8, dropout=0.0)
+    # GPT-2 attention layers are Conv1D, with weight shaped (in, out): the wrapper must handle that layout
+    layer = model.transformer.h[0].attn.c_attn
+    assert isinstance(layer, lora.LoRALinear) and layer.is_conv1d
+    assert layer.base.weight.shape == (64, 192) and layer.lora_A.shape == (4, 64) and layer.lora_B.shape == (192, 4)
+    # only adapter params train, and they are a small fraction
+    lora.assert_only_lora_trainable(model)
+    trainable, total = lora.count_parameters(model)
+    assert 0 < trainable < 0.5 * total and all("lora_" in n for n, p in model.named_parameters() if p.requires_grad)
+    # B starts at zero => identical to the base model until trained
+    with torch.no_grad():
+        assert torch.allclose(model(ids).logits, before, atol=1e-6)
+    # a non-zero adapter changes the forward pass, and disabling adapters restores the base output exactly
+    with torch.no_grad():
+        for l in lora.lora_layers(model):
+            l.lora_B.normal_(0, 0.5)
+        adapted = model(ids).logits
+        assert not torch.allclose(adapted, before, atol=1e-3)
+        with lora.adapters_disabled(model):
+            assert torch.allclose(model(ids).logits, before, atol=1e-6)
+        assert torch.allclose(model(ids).logits, adapted)  # re-enabled afterwards
+        # layout maths: x @ (W + dW) + b  ==  adapter forward (Conv1D stores W as (in, out))
+        x = torch.randn(3, 64)
+        merged = x @ (layer.base.weight + layer.delta_weight()) + layer.base.bias
+        assert torch.allclose(layer(x), merged, atol=1e-5)
+    # base weights untouched by injection; adapter round-trips through save/load
+    lora.save_lora(model, tmp_path / "adapter.pt")
+    fresh, _ = tiny_model()
+    lora.load_lora(fresh, tmp_path / "adapter.pt")
+    with torch.no_grad():
+        assert torch.allclose(fresh(ids).logits, adapted, atol=1e-6)
+    # nn.Linear layers work too
+    lin = lora.LoRALinear(torch.nn.Linear(5, 7), r=2)
+    assert lin.lora_A.shape == (2, 5) and lin.lora_B.shape == (7, 2) and lin(torch.randn(1, 5)).shape == (1, 7)
 
 
 # Milestone 4: Fine-tune the LoRA adapter on the sports commentary corpus.
