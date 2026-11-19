@@ -111,15 +111,49 @@ def test_milestone_3(tmp_path):
 
 
 # Milestone 4: Fine-tune the LoRA adapter on the sports commentary corpus.
-@pytest.mark.skip(reason="remove this line when you start milestone 4")
-def test_milestone_4():
-    raise NotImplementedError("write the test for milestone 4")
+def test_milestone_4(tmp_path):
+    import json
+    import torch
+    from app import lora
+    model, tok = core.milestone_3("tiny", r=8, alpha=16, dropout=0.0)
+    base_before = {n: p.detach().clone() for n, p in model.named_parameters() if "lora_" not in n}
+    small = tmp_path / "small.txt"
+    small.write_text("\n".join(corpus.load_corpus(core.CLEAN_PATH)[:30]) + "\n")
+    hist = core.milestone_4(model, tok, epochs=20, batch_size=8, lr=3e-2, block_size=32, corpus_path=small,
+                            adapter_path=tmp_path / "a.pt", out_dir=tmp_path, device=torch.device("cpu"), log=lambda *_: None)
+    # loss goes down, both on the training batches and on held-out text
+    first = sum(hist["step_loss"][:3]) / 3
+    last = sum(hist["step_loss"][-3:]) / 3
+    assert last < first - 0.1, (first, last)
+    assert hist["val_loss"][-1] < hist["val_loss"][0] - 0.2, hist["val_loss"]
+    # only adapter weights moved; every base weight is bit-identical
+    for n, p in model.named_parameters():
+        if "lora_" not in n:
+            assert torch.equal(p, base_before[n]) and not p.requires_grad, n
+    assert any(float(p.abs().sum()) > 0 for n, p in model.named_parameters() if "lora_B" in n)
+    # artefacts: adapter file + training log + loss curve
+    assert (tmp_path / "a.pt").exists() and (tmp_path / "a.pt").stat().st_size < 1_000_000
+    log = json.loads((tmp_path / "train_log.json").read_text())
+    assert log["trainable_params"] < log["total_params"] and (tmp_path / "loss_curve.txt").read_text().count("*") > 5
 
 
 # Milestone 5: Generate text from the LoRA-adapted LLM.
-@pytest.mark.skip(reason="remove this line when you start milestone 5")
 def test_milestone_5():
-    raise NotImplementedError("write the test for milestone 5")
+    model, tok = core.milestone_3("tiny", dropout=0.0)
+    import torch
+    with torch.no_grad():
+        for p in model.parameters():
+            if p.requires_grad:
+                p.add_(torch.randn_like(p) * 0.2)  # make the adapter non-trivial
+    a = core.milestone_5(model, tok, "The crowd", max_new_tokens=20, seed=7)
+    assert a == core.milestone_5(model, tok, "The crowd", max_new_tokens=20, seed=7)       # deterministic under a seed
+    assert a != core.milestone_5(model, tok, "The crowd", max_new_tokens=20, seed=8)       # ... and seed matters
+    assert isinstance(a, str) and 0 < len(a.encode()) <= 20 * 4
+    # adapters off => base model output, differs from adapted output; adapters come back on afterwards
+    base = core.milestone_5(model, tok, "The crowd", max_new_tokens=20, seed=7, adapters=False)
+    assert base != a and core.milestone_5(model, tok, "The crowd", max_new_tokens=20, seed=7) == a
+    # greedy decoding and empty prompt work
+    assert core.milestone_5(model, tok, "", max_new_tokens=5, temperature=0) == core.milestone_5(model, tok, "", max_new_tokens=5, temperature=0)
 
 
 # Milestone 6: Provide a qualitative comparison interface for generated texts from both models.

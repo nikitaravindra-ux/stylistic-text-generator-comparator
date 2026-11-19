@@ -5,7 +5,7 @@
 from pathlib import Path
 
 from app import corpus
-from app import lora
+from app import finetune, generate as gen, lora
 from app.models import load_model
 from app.ngram import NGramModel
 
@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = ROOT / "corpus" / "raw"
 CLEAN_PATH = ROOT / "corpus" / "clean.txt"
 OUT_DIR = ROOT / "outputs"
+ADAPTER_PATH = OUT_DIR / "adapter" / "lora_adapter.pt"
 
 # --- Milestone 1: Prepare a small corpus of sports commentary text.
 # Hint: Focus on collecting and cleaning a relevant text dataset.
@@ -43,14 +44,31 @@ def milestone_3(model_name: str = "distilgpt2", r: int = 8, alpha: float = 16.0,
 
 # --- Milestone 4: Fine-tune the LoRA adapter on the sports commentary corpus.
 # Hint: Train the LoRA adapters on your prepared corpus, following the fine-tuning process from the drill.
-def milestone_4():  # TODO(milestone 4)
-    raise NotImplementedError("TODO(milestone 4)")
+def milestone_4(model, tok, epochs: int = 8, batch_size: int = 8, lr: float = 5e-4, block_size: int = 64, seed: int = 0,
+                corpus_path=CLEAN_PATH, adapter_path=ADAPTER_PATH, out_dir=OUT_DIR, device=None, log=print) -> dict:
+    """Fine-tune the adapter (only) on the training split, save the adapter + training log, return the loss history."""
+    train, val = corpus.split_lines(corpus.load_corpus(corpus_path))
+    trainable, total = lora.count_parameters(model)
+    log(lora.trainable_summary(model))
+    hist = finetune.train_lora(model, tok, train, val, epochs=epochs, batch_size=batch_size, lr=lr,
+                               block_size=block_size, seed=seed, device=device, log=log)
+    lora.save_lora(model, adapter_path)
+    summary = {"epochs": epochs, "batch_size": batch_size, "lr": lr, "block_size": block_size, "seed": seed,
+               "trainable_params": trainable, "total_params": total, "lora": model.lora_config,
+               "train_lines": len(train), "val_lines": len(val)}
+    finetune.save_training_log(hist, summary, out_dir)
+    return hist
 
 
 # --- Milestone 5: Generate text from the LoRA-adapted LLM.
 # Hint: Utilize your fine-tuned LoRA-adapted LLM to generate new text.
-def milestone_5():  # TODO(milestone 5)
-    raise NotImplementedError("TODO(milestone 5)")
+def milestone_5(model, tok, prompt: str = "", max_new_tokens: int = 40, temperature: float = 0.8, top_k: int = 40,
+                seed: int = 0, adapters: bool = True) -> str:
+    """Generate from the LoRA-adapted LLM (adapters=False runs the untouched base model for comparison)."""
+    if adapters:
+        return gen.generate(model, tok, prompt, max_new_tokens, temperature, top_k, seed)
+    with lora.adapters_disabled(model):
+        return gen.generate(model, tok, prompt, max_new_tokens, temperature, top_k, seed)
 
 
 # --- Milestone 6: Provide a qualitative comparison interface for generated texts from both models.
