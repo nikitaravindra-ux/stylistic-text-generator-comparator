@@ -1,0 +1,9 @@
+{
+  "target_modules": [
+    "c_attn",
+    "c_proj"
+  ],
+  "r": 8,
+  "alpha": 16.0,
+  "dropout": 0.05
+}
