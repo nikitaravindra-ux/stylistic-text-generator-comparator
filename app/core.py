@@ -5,6 +5,7 @@
 from pathlib import Path
 
 from app import corpus
+from app.ngram import NGramModel
 
 ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = ROOT / "corpus" / "raw"
@@ -21,8 +22,10 @@ def milestone_1(raw_dir=RAW_DIR, out_path=CLEAN_PATH, stats_path=OUT_DIR / "corp
 
 # --- Milestone 2: Implement the n-gram model and generate text from it.
 # Hint: Apply the n-gram modeling technique from the drill to build your model and generate text.
-def milestone_2():  # TODO(milestone 2)
-    raise NotImplementedError("TODO(milestone 2)")
+def milestone_2(n: int = 3, k: float = 0.05, corpus_path=CLEAN_PATH) -> NGramModel:
+    """Fit an n-gram model on the training split of the cleaned corpus (the LoRA model trains on the same split)."""
+    train, _ = corpus.split_lines(corpus.load_corpus(corpus_path))
+    return NGramModel(n=n, k=k).fit(train)
 
 
 # --- Milestone 3: Load a small pre-trained LLM and implement LoRA adapter injection.

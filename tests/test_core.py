@@ -40,9 +40,29 @@ def test_milestone_1(tmp_path):
 
 
 # Milestone 2: Implement the n-gram model and generate text from it.
-@pytest.mark.skip(reason="remove this line when you start milestone 2")
 def test_milestone_2():
-    raise NotImplementedError("write the test for milestone 2")
+    from app.ngram import NGramModel
+    lines = ["the striker scores a goal!", "the keeper makes a save!"] * 5 + ["the striker misses a sitter!"]
+    m = NGramModel(n=3, k=0.1).fit(lines)
+    # context matters: after "striker" a goal/miss is possible, never "makes"; after "keeper" only "makes"
+    after_striker = m.next_distribution(["the", "striker"], temperature=1.0)
+    assert set(after_striker) == {"scores", "misses"} and after_striker["scores"] > after_striker["misses"]
+    assert set(m.next_distribution(["the", "keeper"])) == {"makes"}
+    # smoothing: unseen words still get non-zero probability, and probabilities are sane
+    assert 0 < m.prob("penalty", ["the", "striker"]) < m.prob("scores", ["the", "striker"]) < 1
+    # backoff: an unseen two-token context falls back to a shorter one instead of crashing
+    assert m.next_distribution(["zzz", "striker"]) == m.next_distribution(["striker"])
+    # lower temperature is sharper
+    assert (m.next_distribution(["the", "striker"], 0.3)["scores"] > after_striker["scores"])
+    # deterministic under a seed, honours the prompt, stops at end of sentence
+    a = m.generate("the keeper", seed=3)
+    assert a == m.generate("the keeper", seed=3) and a == "makes a save!"
+    # perplexity: in-domain text beats scrambled text; n is configurable
+    assert m.perplexity(["the striker scores a goal!"]) < m.perplexity(["goal a scores striker the!"])
+    assert NGramModel(n=2).fit(lines).n == 2
+    # core wiring, on the real corpus
+    real = core.milestone_2(n=2)
+    assert real.n == 2 and len(real.generate("The crowd", seed=1)) > 0
 
 
 # Milestone 3: Load a small pre-trained LLM and implement LoRA adapter injection.
